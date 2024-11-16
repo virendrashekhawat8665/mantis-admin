@@ -1,0 +1,105 @@
+# Announce the URL as per CRA docs
+# https://github.com/facebook/create-react-app/blob/master/packages/react-scripts/template/README.md#advanced-configuration
+build site:
+  image: node:16
+  stage: build
+  before_script:
+    - echo REACT_APP_VERSION=v1.1.0 >> .env
+    - echo REACT_APP_API="https://api.codot.club/api" >> .env
+    - echo REACT_APP_ASSETSURL="https://api.codot.club" >> .env
+  script:
+    - npm install -g yarn --force
+    - export NODE_OPTIONS=--max_old_space_size=4096
+    - yarn
+    - CI=false yarn build
+  artifacts:
+    expire_in: 1 day
+    paths:
+      - build
+  cache:
+    paths:
+      - node_modules
+  only:
+    - tags
+
+      # Only run on Production tag # Only run on master branch
+# Cache node modules - speeds up future builds
+
+#Name the stages involved in the pipeline
+
+# Job name for gitlab to recognise this results in assets for Gitlab Pages
+# https://docs.gitlab.com/ee/user/project/pages/introduction.html#gitlab-pages-requirements
+deploy:
+  image: ubuntu:latest
+  stage: deploy
+  script:
+    - cat /etc/os-release
+    - apt-get update -qq && apt-get install -y -qq lftp  && apt-get install -y -qq sudo  && apt-get install -y -qq sshpass && apt-get install -y -qq zip && apt-get install -y -qq openssh-server openssh-client
+    - eval $(ssh-agent -s)
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - ssh-keyscan $EC2_IPADDRESS >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+    - sudo mkdir -p ~/.ssh
+    - echo "Host * \n StrictHostKeyChecking no" > ~/.ssh/config
+    - echo " " > ~/.ssh/known_hosts
+    - sudo chmod 400 ~/.ssh/config
+    - sudo chmod 400 ~/.ssh/known_hosts
+    - shopt -s dotglob
+    - mkdir .public
+    - cp -r build/* .public
+    - mv .public publicdeploy
+    - zip -r public.zip publicdeploy
+    - ssh -o StrictHostKeyChecking=no ubuntu@$EC2_IPADDRESS "rm -r  /var/www/codot.club/public_html/admin/*;"
+    - scp -o StrictHostKeyChecking=no public.zip ubuntu@$EC2_IPADDRESS:/var/www/codot.club/public_html/admin
+    - ssh -o StrictHostKeyChecking=no ubuntu@$EC2_IPADDRESS "cd /var/www/codot.club/public_html/admin; unzip public.zip; cp -r /var/www/codot.club/public_html/admin/publicdeploy/* /var/www/codot.club/public_html/admin; rm -rf publicdeploy; rm public.zip"
+  only:
+    - tags # Only run on Production tag # Only run on master branch
+
+dev build site:
+  image: node:16
+  stage: build
+  before_script:
+    - echo REACT_APP_VERSION=v1.1.0 >> .env
+    - echo REACT_APP_API="http://apicodot.bigint.in/api" >> .env
+    - echo REACT_APP_ASSETSURL="http://apicodot.bigint.in" >> .env
+  script:
+    - npm install -g yarn --force
+    - export NODE_OPTIONS=--max_old_space_size=4096
+    - yarn
+    - CI=false yarn build
+  artifacts:
+    expire_in: 1 day
+    paths:
+      - build
+  cache:
+    paths:
+      - node_modules
+  only:
+    - main # Only run on master branch
+# Cache node modules - speeds up future builds
+
+#Name the stages involved in the pipeline
+
+# Job name for gitlab to recognise this results in assets for Gitlab Pages
+# https://docs.gitlab.com/ee/user/project/pages/introduction.html#gitlab-pages-requirements
+dev deploy:
+  image: ubuntu:latest
+  stage: deploy
+  script:
+    - cat /etc/os-release
+    - apt-get update -qq && apt-get install -y -qq lftp  && apt-get install -y -qq sudo  && apt-get install -y -qq sshpass
+    - sudo mkdir -p ~/.ssh
+    - echo "Host * \n StrictHostKeyChecking no" > ~/.ssh/config
+    - echo " " > ~/.ssh/known_hosts
+    - sudo chmod 400 ~/.ssh/config
+    - sudo chmod 400 ~/.ssh/known_hosts
+    - ssh-keyscan $HOST >> ~/.ssh/known_hosts
+    - sshpass -V
+    - export SSHPASS=$PASSWORD
+    - sshpass -e ssh $USERNAME@$HOST 'rm -r  /var/www/bigint.tk/codotadmin/*'
+    - lftp -c "set ssl:verify-certificate no;set sftp:auto-confirm yes; open sftp://$USERNAME:$PASSWORD@$HOST; mirror -Rv build/ /var/www/bigint.tk/codotadmin/  --parallel=50 --exclude-glob .git* --exclude .git/"
+  only:
+    - main # Only run on master branch
+
